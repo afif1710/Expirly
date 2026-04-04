@@ -130,3 +130,11 @@ class VapidPublicKeyResponse(BaseModel):
 class PushSubscriptionResponse(BaseModel):
     message: str
     endpoint: str
+
+
+class PushDeliverySweepResponse(BaseModel):
+    processed_products: int
+    notified_products: int
+    attempted_subscriptions: int
+    successful_subscriptions: int
+    removed_subscriptions: int

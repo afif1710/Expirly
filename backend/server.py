@@ -27,7 +27,7 @@ from models import (
     ProductCreate, ProductResponse, ReminderUpdate,
     DashboardStats, AlertItem, PushSubscriptionPayload,
     PushSubscriptionDeleteRequest, VapidPublicKeyResponse,
-    PushSubscriptionResponse,
+    PushSubscriptionResponse, PushDeliverySweepResponse,
 )
 from auth_service import SupabaseAuthService
 from notification_service import InAppNotificationService, WebPushNotificationService
@@ -83,6 +83,7 @@ async def startup_db():
         await db.products.create_index("id", unique=True)
         await db.products.create_index("user_id")
         await db.products.create_index([("user_id", 1), ("niche_id", 1)])
+        await db.products.create_index([("reminder_push_sent_at", 1), ("reminder_at", 1), ("expiry_date", 1)])
         await db.push_subscriptions.create_index([("user_id", 1), ("endpoint", 1)], unique=True)
         await db.push_subscriptions.create_index("user_id")
         logger.info("Database indexes created successfully")
@@ -415,7 +416,13 @@ async def update_reminder(product_id: str, data: ReminderUpdate, user=Depends(ge
 
     await db.products.update_one(
         {"id": product_id},
-        {"$set": update_data},
+        {
+            "$set": update_data,
+            "$unset": {
+                "reminder_push_sent_at": "",
+                "reminder_push_claimed_at": "",
+            },
+        },
     )
 
     product.update(update_data)
@@ -528,6 +535,15 @@ async def unsubscribe_from_notifications(
         message="Push subscription removed",
         endpoint=data.endpoint,
     )
+
+
+@api_router.post("/notifications/sweep", response_model=PushDeliverySweepResponse)
+async def sweep_due_notifications(user=Depends(get_current_user)):
+    """Sweep and send all currently due reminder pushes using stored subscriptions."""
+    try:
+        return PushDeliverySweepResponse(**(await web_push_service.sweep_due_reminders()))
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 # ========== Food Lookup (Open Food Facts proxy) ==========

@@ -1,7 +1,7 @@
-# Expirly PRD — Push Subscription Setup Layer
+# Expirly PRD — Push Delivery Phase
 
 ## Original Problem Statement
-Implement only the first part of push notifications for this repo: add a browser notification service worker, extend the frontend permission flow to register the worker and create a push subscription, send that subscription to the backend, add backend request models and endpoints for VAPID public key / subscribe / unsubscribe, and store subscriptions in the repo’s real current database layer. Do not implement delivery, schedulers, reminder firing, tracking, retries, quiet hours, or unrelated fixes.
+Implement only the next minimal push-notification delivery phase for this repo: add actual web-push sending on the backend using stored subscriptions, add the minimal reminder firing logic needed to send a push when a product reminder becomes due, prevent duplicate sends in the simplest safe way, and remove invalid/expired subscriptions when push delivery reports them as dead. Do not implement unrelated UI changes, advanced retry logic, quiet hours, analytics, or large refactors.
 
 ## Current Architecture Decisions
 - Real repo confirmed as Expirly: React 18 + TypeScript + Vite frontend, FastAPI + MongoDB backend.
@@ -11,31 +11,32 @@ Implement only the first part of push notifications for this repo: add a browser
 - New backend env names expected for this phase: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_CLAIMS_EMAIL`.
 
 ## What’s Implemented
-- Added browser service worker at `frontend/public/sw.js` with install/activate/push/click handlers.
-- Extended frontend notification permission flow to register the service worker, create/reuse a browser `PushSubscription`, and POST it to the backend after permission is granted.
-- Added backend request/response models for VAPID key and push subscription payloads.
-- Added backend endpoints:
-  - `GET /api/notifications/vapid-public-key`
-  - `POST /api/notifications/subscribe`
-  - `DELETE /api/notifications/unsubscribe`
-- Added MongoDB persistence for push subscriptions with indexes on `(user_id, endpoint)` and `user_id`.
+- Existing subscription setup layer remains intact: service worker, frontend subscription flow, VAPID public-key endpoint, subscribe/unsubscribe endpoints, and MongoDB `push_subscriptions` storage.
+- Added backend web-push delivery using `pywebpush` against stored browser subscriptions.
+- Added minimal backend sweep logic via `POST /api/notifications/sweep` so due reminders can be sent manually now and reused by a future scheduler later.
+- Added duplicate-send protection with claim + sent timestamps on products:
+  - `reminder_push_claimed_at`
+  - `reminder_push_sent_at`
+- Added dead-subscription cleanup: 404/410 web-push failures remove invalid subscriptions from MongoDB.
+- Reset push-send markers when a product reminder is changed so a newly scheduled reminder can send later.
+- Restored a missing backend `.env` file with documented local Mongo/Supabase URL defaults so the backend can boot in this repo state.
 
 ## Prioritized Backlog
 ### P0
-- Add actual web-push delivery using stored subscriptions and VAPID private key.
-- Handle expired/invalid subscriptions during send and auto-clean them up.
+- Set real `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_CLAIMS_EMAIL` values in the runtime environment.
+- Set the real `SUPABASE_ANON_KEY` in `backend/.env` or runtime env if API fallback validation is needed.
 
 ### P1
-- Wire reminder firing logic to stored products/reminder times.
-- Add unsubscribe cleanup on logout or explicit browser revocation flow.
-- Add backend tests for subscribe/unsubscribe and VAPID-key endpoint behavior.
+- Add a scheduler/cron caller for the sweep logic.
+- Add backend tests for sweep, duplicate prevention, and dead-sub cleanup.
+- Add explicit unsubscribe-on-logout or permission-revoke cleanup flow if requested.
 
 ### P2
 - Quiet hours and per-user push preferences.
-- Delivery metrics / push sent tracking.
-- Retry policies and background scheduling.
+- Delivery analytics and history.
+- Retry/backoff policies.
 
 ## Next Tasks
-- Configure the three VAPID env vars in the runtime environment.
-- Implement actual push sending only when the next phase is requested.
-- Add automated API and frontend tests around the new subscription setup flow.
+- Configure the real VAPID values and optional real Supabase anon key in runtime env.
+- Call `POST /api/notifications/sweep` from a scheduler when ready.
+- Add automated tests around the sweep path and push cleanup behavior.

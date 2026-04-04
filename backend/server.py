@@ -11,6 +11,7 @@ Auth Strategy:
 """
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
+import asyncio
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -43,6 +44,7 @@ db = client[os.environ.get('DB_NAME', 'expirly')]
 
 app = FastAPI(title="Expirly API", version="1.0.0")
 api_router = APIRouter(prefix="/api")
+app.state.push_sweep_task = None
 
 # ========== Services ==========
 auth_service = SupabaseAuthService(
@@ -59,6 +61,7 @@ web_push_service = WebPushNotificationService(
 # ========== Constants ==========
 DEFAULT_NICHES = ["Fridge", "Pantry", "Medicine", "Cosmetics"]
 FREE_TIER_MAX_PRODUCTS = 3
+PUSH_SWEEP_INTERVAL_SECONDS = 300
 
 # ========== Logging ==========
 logging.basicConfig(
@@ -69,6 +72,38 @@ logger = logging.getLogger(__name__)
 
 
 # ========== Startup / Shutdown ==========
+
+async def run_push_sweep_scheduler():
+    """Run due reminder push sweeps on a fixed interval."""
+    logger.info(
+        f"Push reminder scheduler started (interval={PUSH_SWEEP_INTERVAL_SECONDS} seconds)"
+    )
+    try:
+        while True:
+            try:
+                result = await web_push_service.sweep_due_reminders()
+                if (
+                    result["processed_products"]
+                    or result["successful_subscriptions"]
+                    or result["removed_subscriptions"]
+                ):
+                    logger.info(
+                        "Push reminder sweep complete: "
+                        f"processed_products={result['processed_products']} "
+                        f"notified_products={result['notified_products']} "
+                        f"attempted_subscriptions={result['attempted_subscriptions']} "
+                        f"successful_subscriptions={result['successful_subscriptions']} "
+                        f"removed_subscriptions={result['removed_subscriptions']}"
+                    )
+            except ValueError as exc:
+                logger.info(f"Push reminder sweep skipped: {exc}")
+            except Exception:
+                logger.exception("Push reminder scheduler iteration failed")
+
+            await asyncio.sleep(PUSH_SWEEP_INTERVAL_SECONDS)
+    except asyncio.CancelledError:
+        logger.info("Push reminder scheduler stopped")
+        raise
 
 @app.on_event("startup")
 async def startup_db():
@@ -87,12 +122,23 @@ async def startup_db():
         await db.push_subscriptions.create_index([("user_id", 1), ("endpoint", 1)], unique=True)
         await db.push_subscriptions.create_index("user_id")
         logger.info("Database indexes created successfully")
+
+        if app.state.push_sweep_task is None or app.state.push_sweep_task.done():
+            app.state.push_sweep_task = asyncio.create_task(run_push_sweep_scheduler())
     except Exception as e:
         logger.warning(f"Index creation warning (may already exist): {e}")
 
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    push_sweep_task = app.state.push_sweep_task
+    if push_sweep_task is not None:
+        push_sweep_task.cancel()
+        try:
+            await push_sweep_task
+        except asyncio.CancelledError:
+            pass
+        app.state.push_sweep_task = None
     client.close()
 
 

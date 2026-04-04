@@ -30,10 +30,10 @@ REACT_APP_SUPABASE_ANON_KEY=<set>
 
 **1. URL Configuration** (if not already done):
 - Go to Supabase Dashboard → Authentication → URL Configuration
-- Set **Site URL**: `https://niche-keeper.preview.emergentagent.com`
+- Set **Site URL**: `https://expirly-push-setup.preview.emergentagent.com`
 - Add to **Redirect URLs** (one per line):
   ```
-  https://niche-keeper.preview.emergentagent.com/**
+  https://expirly-push-setup.preview.emergentagent.com/**
   http://localhost:3000/**
   ```
 

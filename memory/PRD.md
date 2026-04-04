@@ -1,63 +1,41 @@
-# Expirly - Product Requirements Document (Phase 1 MVP)
+# Expirly PRD — Push Subscription Setup Layer
 
-## Purpose
-Simple mobile-first expiry reminder app. Users organize products into niches/categories and get reminded before expiry.
+## Original Problem Statement
+Implement only the first part of push notifications for this repo: add a browser notification service worker, extend the frontend permission flow to register the worker and create a push subscription, send that subscription to the backend, add backend request models and endpoints for VAPID public key / subscribe / unsubscribe, and store subscriptions in the repo’s real current database layer. Do not implement delivery, schedulers, reminder firing, tracking, retries, quiet hours, or unrelated fixes.
 
-## Core Flow
-1. Sign in → 2. Create/select niche → 3. Add product (scan barcode or manual) → 4. Set expiry + reminder → 5. Track from dashboard + alerts → 6. Delete only after expired
+## Current Architecture Decisions
+- Real repo confirmed as Expirly: React 18 + TypeScript + Vite frontend, FastAPI + MongoDB backend.
+- Real auth confirmed as Supabase Auth on the frontend with backend Bearer-token validation via existing `get_current_user` dependency.
+- Push subscription storage uses the existing MongoDB layer in a dedicated `push_subscriptions` collection.
+- Frontend keeps the repo’s current env convention by fetching the VAPID public key from the backend instead of introducing a new frontend env variable.
+- New backend env names expected for this phase: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_CLAIMS_EMAIL`.
 
-## Business Rules
-- Free tier: 3 active products max
-- Product details locked after save (only reminder editable)
-- Reminder cannot exceed expiry date
-- Products can only be deleted after expiry
-- Default niches: Fridge, Pantry, Medicine, Cosmetics
-- Custom niches allowed
+## What’s Implemented
+- Added browser service worker at `frontend/public/sw.js` with install/activate/push/click handlers.
+- Extended frontend notification permission flow to register the service worker, create/reuse a browser `PushSubscription`, and POST it to the backend after permission is granted.
+- Added backend request/response models for VAPID key and push subscription payloads.
+- Added backend endpoints:
+  - `GET /api/notifications/vapid-public-key`
+  - `POST /api/notifications/subscribe`
+  - `DELETE /api/notifications/unsubscribe`
+- Added MongoDB persistence for push subscriptions with indexes on `(user_id, endpoint)` and `user_id`.
 
-## Tech Stack
-- Backend: FastAPI + MongoDB
-- Frontend: React 18 + TypeScript + Vite + Tailwind CSS
-- Auth: Mock (abstracted for Supabase swap)
-- Notifications: In-app (abstracted for push notification support later)
+## Prioritized Backlog
+### P0
+- Add actual web-push delivery using stored subscriptions and VAPID private key.
+- Handle expired/invalid subscriptions during send and auto-clean them up.
 
-## Design
-- Sage/soft green palette
-- Mobile-first, rounded cards, bottom tab navigation
-- Clean, minimal, serene interface
+### P1
+- Wire reminder firing logic to stored products/reminder times.
+- Add unsubscribe cleanup on logout or explicit browser revocation flow.
+- Add backend tests for subscribe/unsubscribe and VAPID-key endpoint behavior.
 
----
+### P2
+- Quiet hours and per-user push preferences.
+- Delivery metrics / push sent tracking.
+- Retry policies and background scheduling.
 
-## Phase 1: MVP (Complete)
-- Full auth flow (mock/demo), niche management, product CRUD
-- Dashboard (slot indicator, product groups), Alerts, Profile
-- All 13 backend business rule tests passed
-
-## Phase 2: Barcode Scanning + Stabilization (Complete)
-- html5-qrcode camera barcode scanner (BarcodeScanner component)
-- Open Food Facts product lookup proxied via backend (GET /api/food/lookup)
-- Product name autofill on barcode scan/lookup
-- Graceful fallback for camera unavailable, barcode not found, service error
-- Added retry logic in backend for intermittent Open Food Facts responses
-- Added data-testid attributes throughout for testability
-- 22/22 backend tests passed
-
----
-
-## Phase 3: Supabase Auth + Google OAuth (Complete — Apr 2026)
-- SupabaseAuthService with JWKS ES256 local validation + API fallback (no service_role key)
-- JWKS cache with auto-refresh on key rotation miss
-- Google OAuth: signInWithOAuth → /auth/callback PKCE exchange → MongoDB profile auto-sync
-- Login + Register: "Continue with Google" (primary) + email/password (secondary, via Supabase)
-- AuthCallback.tsx handles code exchange; deprecated mock endpoints return 410
-- 15/15 backend + 12/12 frontend tests passed (100%)
-
-## Upcoming (P1-P2)
-- P1: Payments integration (Stripe — premium tier unlock)
-- P1: Real push notifications (PWA service worker or mobile-native)
-- P2: Additional features (only if requested; guardrails apply)
-
-## Phase 4: Paywall UI + Profile Polish (Complete — Apr 2026)
-- PaywallModal bottom sheet: free vs premium comparison, disabled "Upgrade" CTA (payments TBD)
-- Dashboard: amber upgrade banner when at 3/3 limit; Add button opens paywall when full
-- AddProduct: 403 limit error → PaywallModal (not raw error text)
-- Profile: Google avatar from Supabase user_metadata.avatar_url, plan info card, upgrade button
+## Next Tasks
+- Configure the three VAPID env vars in the runtime environment.
+- Implement actual push sending only when the next phase is requested.
+- Add automated API and frontend tests around the new subscription setup flow.

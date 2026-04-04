@@ -2,7 +2,7 @@
 # Expirly Backend API Test Script
 # ===============================
 
-BASE_URL="https://niche-keeper.preview.emergentagent.com/api"
+BASE_URL="https://expirly-push-setup.preview.emergentagent.com/api"
 TEST_EMAIL="testbackend3@expirly.com"
 TEST_PASSWORD="testpass123"
 TEST_NAME="Backend Tester 3"

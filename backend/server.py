@@ -25,10 +25,12 @@ from datetime import datetime, timedelta, timezone
 from models import (
     UserResponse, NicheCreate, NicheResponse,
     ProductCreate, ProductResponse, ReminderUpdate,
-    DashboardStats, AlertItem,
+    DashboardStats, AlertItem, PushSubscriptionPayload,
+    PushSubscriptionDeleteRequest, VapidPublicKeyResponse,
+    PushSubscriptionResponse,
 )
 from auth_service import SupabaseAuthService
-from notification_service import InAppNotificationService
+from notification_service import InAppNotificationService, WebPushNotificationService
 
 # ========== Configuration ==========
 
@@ -48,6 +50,11 @@ auth_service = SupabaseAuthService(
     supabase_anon_key=os.environ["SUPABASE_ANON_KEY"],
 )
 notification_service = InAppNotificationService(db)
+web_push_service = WebPushNotificationService(
+    db,
+    vapid_private_key=os.environ.get("VAPID_PRIVATE_KEY", ""),
+    vapid_claims={"sub": f"mailto:{os.environ.get('VAPID_CLAIMS_EMAIL', 'noreply@expirly.app')}"},
+)
 
 # ========== Constants ==========
 DEFAULT_NICHES = ["Fridge", "Pantry", "Medicine", "Cosmetics"]
@@ -76,6 +83,8 @@ async def startup_db():
         await db.products.create_index("id", unique=True)
         await db.products.create_index("user_id")
         await db.products.create_index([("user_id", 1), ("niche_id", 1)])
+        await db.push_subscriptions.create_index([("user_id", 1), ("endpoint", 1)], unique=True)
+        await db.push_subscriptions.create_index("user_id")
         logger.info("Database indexes created successfully")
     except Exception as e:
         logger.warning(f"Index creation warning (may already exist): {e}")
@@ -484,6 +493,41 @@ async def get_alerts(user=Depends(get_current_user)):
     """Get alerts/reminders for the current user."""
     alerts = await notification_service.get_pending_alerts(user["id"])
     return {"alerts": alerts, "count": len(alerts)}
+
+
+@api_router.get("/notifications/vapid-public-key", response_model=VapidPublicKeyResponse)
+async def get_vapid_public_key():
+    """Return the configured VAPID public key for browser push subscription setup."""
+    public_key = os.environ.get("VAPID_PUBLIC_KEY")
+    if not public_key:
+        raise HTTPException(status_code=503, detail="Push notifications are not configured")
+    return VapidPublicKeyResponse(public_key=public_key)
+
+
+@api_router.post("/notifications/subscribe", response_model=PushSubscriptionResponse)
+async def subscribe_to_notifications(
+    subscription: PushSubscriptionPayload,
+    user=Depends(get_current_user),
+):
+    """Register or update a browser push subscription for the current user."""
+    await web_push_service.register_subscription(user["id"], subscription.dict())
+    return PushSubscriptionResponse(
+        message="Push subscription registered",
+        endpoint=subscription.endpoint,
+    )
+
+
+@api_router.delete("/notifications/unsubscribe", response_model=PushSubscriptionResponse)
+async def unsubscribe_from_notifications(
+    data: PushSubscriptionDeleteRequest,
+    user=Depends(get_current_user),
+):
+    """Remove a browser push subscription for the current user."""
+    await web_push_service.unregister_subscription(user["id"], data.endpoint)
+    return PushSubscriptionResponse(
+        message="Push subscription removed",
+        endpoint=data.endpoint,
+    )
 
 
 # ========== Food Lookup (Open Food Facts proxy) ==========

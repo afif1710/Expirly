@@ -19,7 +19,16 @@ export default function Profile() {
   const navigate = useNavigate()
   const [avatarUrl, setAvatarUrl] = useState('')
   const [showPaywall, setShowPaywall] = useState(false)
-  const { permission, requestPermission, isSupported, isGranted, isDenied } = useNotificationPermission()
+  const {
+    permission,
+    requestPermission,
+    ensurePushSubscription,
+    isSupported,
+    isGranted,
+    isDenied,
+    subscriptionStatus,
+    subscriptionError,
+  } = useNotificationPermission()
   const [requestingPerm, setRequestingPerm] = useState(false)
 
   useEffect(() => {
@@ -38,15 +47,29 @@ export default function Profile() {
 
   const handleRequestPermission = async () => {
     setRequestingPerm(true)
-    await requestPermission()
+    const result = await requestPermission()
+    let subscribed = result !== 'granted'
+
+    if (result === 'granted') {
+      subscribed = await ensurePushSubscription()
+    }
+
     setRequestingPerm(false)
-    // Save state to local prefs
-    const prefs = loadPrefs()
-    localStorage.setItem(PREF_KEY, JSON.stringify({ ...prefs, push_enabled: true }))
+
+    if (subscribed) {
+      const prefs = loadPrefs()
+      localStorage.setItem(PREF_KEY, JSON.stringify({ ...prefs, push_enabled: true }))
+    }
   }
 
   const permLabel = () => {
     if (!isSupported) return { text: 'Not supported', color: 'text-gray-400', Icon: BellOff }
+    if (subscriptionStatus === 'registering') {
+      return { text: 'Setting up push...', color: 'text-sage-500', Icon: Bell }
+    }
+    if (isGranted && subscriptionStatus === 'error') {
+      return { text: 'Permission granted, setup failed', color: 'text-amber-600', Icon: BellOff }
+    }
     if (isGranted) return { text: 'Enabled', color: 'text-emerald-600', Icon: BellRing }
     if (isDenied) return { text: 'Blocked in browser', color: 'text-red-500', Icon: BellOff }
     return { text: 'Not enabled', color: 'text-sage-500', Icon: Bell }
@@ -133,7 +156,7 @@ export default function Profile() {
             <PermIcon size={16} className={permColor} />
             <div>
               <p className="text-[13px] font-medium text-sage-800">Push notifications</p>
-              <p className={`text-[11px] ${permColor}`}>{permText}</p>
+              <p className={`text-[11px] ${permColor}`} data-testid="push-notification-status-text">{permText}</p>
             </div>
           </div>
           {!isGranted && !isDenied && isSupported && (
@@ -150,15 +173,30 @@ export default function Profile() {
             <span className="text-[11px] text-sage-400">Allow in browser settings</span>
           )}
           {isGranted && (
-            <span className="text-[11px] font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Active</span>
+            <span
+              className="text-[11px] font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full"
+              data-testid="push-notification-active-badge"
+            >
+              Active
+            </span>
           )}
         </div>
+
+        {subscriptionError && (
+          <p className="text-[11px] text-amber-600" data-testid="push-notification-error-text">
+            {subscriptionError}
+          </p>
+        )}
 
         <div className="border-t border-sage-100 pt-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[13px] font-medium text-sage-700">Reminder delivery</p>
-              <p className="text-[11px] text-sage-400 mt-0.5">In-app alerts active · Push coming soon</p>
+              <p className="text-[11px] text-sage-400 mt-0.5" data-testid="reminder-delivery-status-text">
+                {subscriptionStatus === 'subscribed'
+                  ? 'In-app alerts active · Browser push subscription saved'
+                  : 'In-app alerts active · Browser push setup available'}
+              </p>
             </div>
             <ChevronRight size={16} className="text-sage-300" />
           </div>

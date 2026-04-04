@@ -15,7 +15,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Configuration
-BASE_URL = "https://niche-keeper.preview.emergentagent.com/api"
+BASE_URL = "https://expirly-push-setup.preview.emergentagent.com/api"
 TEST_EMAIL = "testbackend@expirly.com"
 TEST_PASSWORD = "testpass123"
 TEST_NAME = "Backend Tester"

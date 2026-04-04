@@ -104,3 +104,29 @@ class AlertItem(BaseModel):
     reminder_at: datetime
     alert_type: Literal["upcoming", "expiring_today", "expired"]
     message: str
+
+
+# ========== Push Subscription Models ==========
+
+class PushSubscriptionKeys(BaseModel):
+    p256dh: str = Field(min_length=1)
+    auth: str = Field(min_length=1)
+
+
+class PushSubscriptionPayload(BaseModel):
+    endpoint: str = Field(min_length=1)
+    expirationTime: Optional[int] = None
+    keys: PushSubscriptionKeys
+
+
+class PushSubscriptionDeleteRequest(BaseModel):
+    endpoint: str = Field(min_length=1)
+
+
+class VapidPublicKeyResponse(BaseModel):
+    public_key: str
+
+
+class PushSubscriptionResponse(BaseModel):
+    message: str
+    endpoint: str

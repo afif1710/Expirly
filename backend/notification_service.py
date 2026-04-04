@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import List, Optional
+import uuid
 
 
 # ── Preferences dataclass ──────────────────────────────────────────────────
@@ -180,10 +181,27 @@ class WebPushNotificationService(NotificationService):
         """
         Persist a browser PushSubscription object for server-side push delivery.
         subscription = { endpoint, keys: { p256dh, auth } }
-        TODO: upsert into db.push_subscriptions.
         """
-        raise NotImplementedError("Subscription registration not yet implemented")
+        now = datetime.now(timezone.utc)
+        endpoint = subscription["endpoint"]
+        await self.db.push_subscriptions.update_one(
+            {"user_id": user_id, "endpoint": endpoint},
+            {
+                "$set": {
+                    "endpoint": endpoint,
+                    "subscription": subscription,
+                    "expiration_time": subscription.get("expirationTime"),
+                    "updated_at": now,
+                },
+                "$setOnInsert": {
+                    "id": str(uuid.uuid4()),
+                    "user_id": user_id,
+                    "created_at": now,
+                },
+            },
+            upsert=True,
+        )
 
     async def unregister_subscription(self, user_id: str, endpoint: str) -> None:
         """Remove a push subscription (e.g., on logout or permission revoke)."""
-        raise NotImplementedError("Subscription removal not yet implemented")
+        await self.db.push_subscriptions.delete_one({"user_id": user_id, "endpoint": endpoint})

@@ -11,6 +11,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import type { Session } from '@supabase/supabase-js';
 import type { User } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import { api } from '../lib/api';
@@ -29,7 +30,24 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const buildFallbackUser = useCallback((sessionUser: any): User => {
+    const metadata = sessionUser?.user_metadata || {};
+    const email = sessionUser?.email || '';
+    const name =
+      metadata.full_name ||
+      metadata.name ||
+      (email ? email.split('@')[0] : 'User');
+    return {
+      id: sessionUser?.id || '',
+      email,
+      name,
+      created_at: new Date().toISOString(),
+      max_active_products: 3,
+    };
+  }, []);
 
   /**
    * Sync Supabase user profile to MongoDB via GET /api/auth/me.
@@ -41,33 +59,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(profile);
       return profile;
     } catch {
-      setUser(null);
       return null;
     }
   }, []);
 
   useEffect(() => {
     // Bootstrap: check if there's an active session already
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session) {
-        await syncProfile();
+    let sessionChecked = false;
+    const loadingTimeout = window.setTimeout(() => {
+      // Fail-safe: if getSession never resolves, fall back to logged-out state.
+      if (!sessionChecked) {
+        setUser(null);
+        setIsLoading(false);
       }
-      setIsLoading(false);
-    });
+    }, 5000);
+
+    supabase.auth.getSession()
+      .then(async ({ data: { session } }) => {
+        sessionChecked = true;
+        window.clearTimeout(loadingTimeout);
+        setSession(session ?? null);
+        if (session) {
+          // Set a fallback user immediately so ProtectedRoute won't bounce.
+          setUser(buildFallbackUser(session.user));
+          await syncProfile();
+        }
+      })
+      .catch(() => {
+        sessionChecked = true;
+        window.clearTimeout(loadingTimeout);
+        // If Supabase fails, fall back to logged-out state instead of hanging.
+        setSession(null);
+        setUser(null);
+      })
+      .finally(() => {
+        window.clearTimeout(loadingTimeout);
+        setIsLoading(false);
+      });
 
     // Listen for future auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
+          setSession(session);
+          setUser(buildFallbackUser(session.user));
           await syncProfile();
         } else if (event === 'SIGNED_OUT') {
+          setSession(null);
           setUser(null);
         }
       }
     );
 
-    return () => subscription.unsubscribe();
-  }, [syncProfile]);
+    return () => {
+      window.clearTimeout(loadingTimeout);
+      subscription.unsubscribe();
+    };
+  }, [buildFallbackUser, syncProfile]);
 
   // ── Auth Actions ──────────────────────────────────────────────────
 
@@ -109,7 +157,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
-        isAuthenticated: !!user,
+        isAuthenticated: !!session,
         isLoading,
         signInWithGoogle,
         login,

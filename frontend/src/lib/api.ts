@@ -6,12 +6,35 @@
 
 import { supabase } from './supabaseClient';
 
-const API_BASE = import.meta.env.REACT_APP_BACKEND_URL || '';
+const API_BASE =
+  import.meta.env.REACT_APP_BACKEND_URL ||
+  import.meta.env.VITE_BACKEND_URL ||
+  'http://localhost:8000';
 
 class ApiClient {
+  private getTokenFromStorage(): string | null {
+    try {
+      const raw = window.localStorage.getItem('expirly_sb_session');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed?.access_token ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private async getToken(): Promise<string | null> {
-    const { data: { session } } = await supabase.auth.getSession();
-    return session?.access_token ?? null;
+    // Supabase getSession can hang in some environments; add a timeout + storage fallback.
+    const sessionPromise = supabase.auth.getSession()
+      .then(({ data: { session } }) => session?.access_token ?? null)
+      .catch(() => null);
+
+    const timeoutPromise = new Promise<string | null>((resolve) => {
+      window.setTimeout(() => resolve(null), 1500);
+    });
+
+    const token = await Promise.race([sessionPromise, timeoutPromise]);
+    return token ?? this.getTokenFromStorage();
   }
 
   private async request<T = any>(path: string, options: RequestInit = {}): Promise<T> {
